@@ -275,7 +275,7 @@ def transcribe(
                             start=time_offset + start_timestamp_pos * time_precision,
                             end=time_offset + end_timestamp_pos * time_precision,
                             tokens=sliced_tokens,
-                            token_probs=sliced_token_probs
+                            token_probs=sliced_token_probs,
                             result=result,
                         )
                     )
