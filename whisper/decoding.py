@@ -283,9 +283,13 @@ class GreedyDecoder(TokenDecoder):
 
         next_tokens[tokens[:, -1] == self.eot] = self.eot
         tokens = torch.cat([tokens, next_tokens[:, None]], dim=-1)
-        
+
         current_token_probs = probs[torch.arange(probs.shape[0]), next_tokens]
         token_probs = torch.cat([token_probs, current_token_probs[:, None]], dim=-1)
+
+        # token_logits = torch.stack([logits[k, next_tokens[k]] for k in range(next_tokens .shape[0])], dim=0)
+        # or use logprobs, the log softmax of the logits
+        # return it along with tokens and completed
 
         completed = (tokens[:, -1] == self.eot).all()
         return tokens, completed, token_probs
@@ -320,7 +324,7 @@ class BeamSearchDecoder(TokenDecoder):
         self.finished_sequences = None
 
     def update(
-        self, tokens: Tensor, logits: Tensor, sum_logprobs: Tensor, token_probs: Tensor
+        self, tokens: Tensor, logits: Tensor, sum_logprobs: Tensor
     ) -> Tuple[Tensor, bool]:
         if tokens.shape[0] % self.beam_size != 0:
             raise ValueError(f"{tokens.shape}[0] % {self.beam_size} != 0")
@@ -380,7 +384,7 @@ class BeamSearchDecoder(TokenDecoder):
         )
         return tokens, completed
 
-    def finalize(self, preceding_tokens: Tensor, sum_logprobs: Tensor):
+    def finalize(self, preceding_tokens: Tensor, sum_logprobs: Tensor, token_probs: Tensor):
         # collect all finished sequences, including patience, and add unfinished ones if not enough
         sum_logprobs = sum_logprobs.cpu()
         for i, sequences in enumerate(self.finished_sequences):
@@ -475,12 +479,7 @@ class ApplyTimestampRules(LogitFilter):
             ]
             if timestamps.numel() > 0:
                 # timestamps shouldn't decrease; forbid timestamp tokens smaller than the last
-                # also force each segment to have a nonzero length, to prevent infinite looping
-                if last_was_timestamp and not penultimate_was_timestamp:
-                    timestamp_last = timestamps[-1]
-                else:
-                    timestamp_last = timestamps[-1] + 1
-                logits[k, self.tokenizer.timestamp_begin : timestamp_last] = -np.inf
+                logits[k, self.tokenizer.timestamp_begin : timestamps[-1]] = -np.inf
 
         if tokens.shape[1] == self.sample_begin:
             # suppress generating non-timestamp tokens at the beginning
@@ -678,7 +677,7 @@ class DecodingTask:
         n_batch = tokens.shape[0]
         sum_logprobs: Tensor = torch.zeros(n_batch, device=audio_features.device)
         no_speech_probs = [np.nan] * n_batch
-        
+
         token_probs = torch.zeros_like(tokens).float()
 
         try:
@@ -783,6 +782,7 @@ class DecodingTask:
                 no_speech_prob=no_speech_prob,
                 temperature=self.options.temperature,
                 compression_ratio=compression_ratio(text),
+                token_probs=token_probs[-len(tokens):]
             )
             for text, language, tokens, features, avg_logprob, no_speech_prob, token_probs in zip(
                 *fields
