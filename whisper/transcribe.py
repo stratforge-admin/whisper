@@ -202,16 +202,18 @@ def transcribe(
         initial_prompt_tokens = []
 
     def new_segment(
-        *, start: float, end: float, tokens: torch.Tensor, result: DecodingResult
+        *, start: float, end: float, tokens: torch.Tensor, token_probs: torch.Tensor,result: DecodingResult
     ):
         tokens = tokens.tolist()
         text_tokens = [token for token in tokens if token < tokenizer.eot]
+        tokens = token_probs.tolist()
         return {
             "seek": seek,
             "start": start,
             "end": end,
             "text": tokenizer.decode(text_tokens),
             "tokens": tokens,
+            "token_probs": token_probs,
             "temperature": result.temperature,
             "avg_logprob": result.avg_logprob,
             "compression_ratio": result.compression_ratio,
@@ -232,6 +234,7 @@ def transcribe(
             decode_options["prompt"] = all_tokens[prompt_reset_since:]
             result: DecodingResult = decode_with_fallback(mel_segment)
             tokens = torch.tensor(result.tokens)
+            token_probs = torch.tensor(result.token_probs)
 
             if no_speech_threshold is not None:
                 # no voice activity check
@@ -264,6 +267,7 @@ def transcribe(
                 last_slice = 0
                 for current_slice in slices:
                     sliced_tokens = tokens[last_slice:current_slice]
+                    sliced_token_probs = token_probs[last_slice:current_slice]
                     start_timestamp_pos = (
                         sliced_tokens[0].item() - tokenizer.timestamp_begin
                     )
@@ -275,6 +279,7 @@ def transcribe(
                             start=time_offset + start_timestamp_pos * time_precision,
                             end=time_offset + end_timestamp_pos * time_precision,
                             tokens=sliced_tokens,
+                            token_probs=sliced_token_probs,
                             result=result,
                         )
                     )
@@ -307,6 +312,7 @@ def transcribe(
                         start=time_offset,
                         end=time_offset + duration,
                         tokens=tokens,
+                        token_probs = token_probs,
                         result=result,
                     )
                 )
@@ -343,6 +349,7 @@ def transcribe(
                 if segment["start"] == segment["end"] or segment["text"].strip() == "":
                     segment["text"] = ""
                     segment["tokens"] = []
+                    segment["token_probs"] = []
                     segment["words"] = []
 
             all_segments.extend(
